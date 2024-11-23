@@ -1,0 +1,51 @@
+---
+title: "mini-analysis"
+author: "deblina"
+date: "2024-11-23"
+output: html_document
+---
+
+```{r message=FALSE, warning=FALSE}
+library(tidyverse)
+
+df <- read_csv("asos_digital_experiments_dataset.csv")
+```
+
+This dataset has `r df %>% count(experiment_id) %>% nrow()` experiments, each with their own 
+
+## Experiment 1 
+
+```{r}
+exp1 <- df %>% 
+  filter(experiment_id == "036afc")
+```
+
+```{r}
+
+exp1 %>% 
+  group_by(time_since_start) %>% 
+  summarize(n = sum(count_t, count_c)) %>% 
+  mutate(cumulative_sum = cumsum(n)) %>% 
+  ggplot() + 
+  geom_line(aes(time_since_start, cumulative_sum)) + 
+  theme_minimal() + 
+  labs(x = "Time since start (days)", 
+       y = "Cumulative Num. Exposures") + 
+  scale_y_continuous(labels = scales::comma)
+
+```
+
+There are a `r exp1 %>% count(metric_id) %>% nrow()` metrics in per experiment. 
+
+1. Metric 1 is a binary count 
+
+```{r}
+
+exp1 %>% 
+  filter(metric_id == 1) %>% 
+  mutate(mean_diff = mean_t - mean_c)
+
+```
+
+
+
