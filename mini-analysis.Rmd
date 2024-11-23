@@ -2,16 +2,21 @@
 title: "mini-analysis"
 author: "deblina"
 date: "2024-11-23"
-output: html_document
+output: 
+  html_document:
+    toc: TRUE
+    df_print: paged
+    mathjax: "default"
 ---
 
 ```{r message=FALSE, warning=FALSE}
 library(tidyverse)
+library(DT)
 
 df <- read_csv("asos_digital_experiments_dataset.csv")
 ```
 
-This dataset has `r df %>% count(experiment_id) %>% nrow()` experiments, each with their own 
+This dataset has `r df %>% count(experiment_id) %>% nrow()` experiments. 
 
 ## Experiment 1 
 
@@ -35,17 +40,91 @@ exp1 %>%
 
 ```
 
-There are a `r exp1 %>% count(metric_id) %>% nrow()` metrics in per experiment. 
-
-1. Metric 1 is a binary count 
+Along with exposures, we should also check for an SRM (sample-ratio mismatch). I'll do this using a Chi-Square test but I think you could also use a binomial here since there are only two variants. 
 
 ```{r}
 
-exp1 %>% 
-  filter(metric_id == 1) %>% 
-  mutate(mean_diff = mean_t - mean_c)
+exp1 %>%
+  group_by(experiment_id, variant_id, metric_id) %>%
+  filter(count_c > 0 & count_t > 0) %>%
+  mutate(
+    total_count = count_c + count_t,
+    expected_c = total_count / 2,  # Expected 50/50 split for count_c
+    expected_t = total_count / 2   # Expected 50/50 split for count_t
+  ) %>%
+  ungroup() %>% 
+  rowwise() %>%
+  mutate(
+    chi_square_test_p_value = tryCatch({
+      # Observed counts
+      obs <- c(count_c, count_t)
+      # Expected counts (50/50 ratio)
+      exp <- c(expected_c, expected_t)
+      
+      # Perform the chi-square test
+      chisq_result <- chisq.test(matrix(c(obs, exp), ncol = 2))
+      chisq_result$p.value
+    }, error = function(e) NA) # Handle errors by returning NA
+  )
+
 
 ```
 
 
+
+There are a `r exp1 %>% count(metric_id) %>% nrow()` metrics per experiment. 
+
+### Metric 1: A Binary Count
+
+Calculating a confidence interval for the difference between two binary counts requires calculating a pooled standard error. The formula for this is 
+
+$$ 
+
+\hat{p} = \frac{(mean_c * count_c) + (mean_t * count_t)}{count_c + count_t} \\
+$$
+
+$$ 
+
+SE_{pooled} = \sqrt{(\hat{p}) * (1 - \hat{p}) * (\frac{1}{n_c}+ \frac{1}{n_t})}
+
+$$ 
+
+
+```{r}
+
+exp1_sig_tests <- exp1 %>% 
+  filter(metric_id == 1) %>% 
+  mutate(mean_diff = mean_t - mean_c, 
+        pooled_prop = (mean_c * count_c + mean_t * count_t) / (count_c + count_t), 
+        se_pool = sqrt(pooled_prop * (1 - pooled_prop) * (1 / count_c + 1 / count_t)), 
+        z_stat = mean_diff / se_pool, 
+        p_value = 2 * pnorm(-abs(z_stat)), 
+        # N is big enough to approx. normal
+        ci_lower = mean_diff - (1.96 * se_pool),
+        ci_upper = mean_diff + (1.96 * se_pool)
+) 
+
+
+exp1_sig_tests %>% 
+  DT::datatable(options = list(scrollX = TRUE, paging=TRUE))
+```
+
+Here are just the results that are significant at the 95% confidence level (meaning that we are willing to accept a 5% chance of incorrectly rejecting the null hypothesis: in 100 replications of these experiments, we would expect approx. 5 false positives). 
+
+```{r}
+
+exp1_sig_tests %>% 
+  filter(p_value < 0.05) %>%
+  DT::datatable(options = list(scrollX = TRUE, paging=TRUE))
+
+```
+
+
+### Metric 2: Count-based Responses
+
+The [documentation](https://osf.io/64jsb/wiki/home/) says that this metic displays some degree of right skew-ness, which should make the mean higher than the median. 
+
+### Metric 4: Negative, non-real number responses 
+
+The [documentation](https://osf.io/64jsb/wiki/home/) says that this metic displays some degree of right skew-ness, which should make the mean higher than the median. 
 
